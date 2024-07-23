@@ -232,7 +232,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     @PATCH
     @Consumes("application/json")
     @Path("renamemetadata")
-    public Response renameMetadata(JSONObject content) {
+    public Response renameMetadata(String body) {
+        JSONObject content = new JSONObject(body);
         ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "renameMetadata");
         JsonArrayBuilder responseArr = Json.createArrayBuilder();
 
