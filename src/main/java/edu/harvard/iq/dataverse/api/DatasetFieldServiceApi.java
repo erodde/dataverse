@@ -27,6 +27,7 @@ import jakarta.json.JsonArrayBuilder;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -43,6 +44,8 @@ import java.util.logging.Logger;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.TypedQuery;
 import jakarta.ws.rs.core.Response.Status;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.FileOutputStream;
@@ -226,6 +229,42 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         METADATABLOCK, DATASETFIELD, CONTROLLEDVOCABULARY
     }
 
+    @PATCH
+    @Consumes("application/json")
+    @Path("renamemetadata")
+    public Response renameMetadata(JSONObject content) {
+        ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "renameMetadata");
+        JsonArrayBuilder responseArr = Json.createArrayBuilder();
+
+        try {
+            String oldValue = content.getString("old");
+            String newValue = content.getString("new");
+            alr.setInfo("rename metadata body from " + oldValue + " to " + newValue);
+            MetadataBlock mdb = metadataBlockService.findByName(oldValue);
+            if (mdb == null) {
+                String message = "metadata block not found ";
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.BadRequest);
+                alr.setInfo( alr.getInfo() + "// " + message);
+                return error(Status.EXPECTATION_FAILED, message);
+            }
+            mdb.setName(newValue);
+            metadataBlockService.save(mdb);
+            responseArr.add( Json.createObjectBuilder()
+                .add("old name", oldValue)
+                .add("new name", newValue));
+        } catch (JSONException e) {
+            String message = "Request failed with malformed body ";
+            logger.log(Level.WARNING, message, e);
+            alr.setActionResult(ActionLogRecord.Result.BadRequest);
+            alr.setInfo(alr.getInfo() + "// " + message);
+            return error(Status.EXPECTATION_FAILED, message);
+        } finally {
+            actionLogSvc.log(alr);
+        }
+        return ok(Json.createObjectBuilder().add("renamed metadata", responseArr) );
+    }
+
     @POST
     @Consumes("text/tab-separated-values")
     @Path("load")
@@ -385,7 +424,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             mdb = new MetadataBlock();
         }
         mdb.setName(values[1]);
-        if (!values[2].isEmpty()){
+        if (!values[2].isEmpty()) {
             mdb.setOwner(dataverseService.findByAlias(values[2]));
         }
         mdb.setDisplayName(values[3]);
@@ -438,21 +477,9 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         //See if it already exists
         /*
          Matching relies on assumption that only one cv value will exist for a given identifier or display value
-        If the lookup queries return multiple matches then retval is null 
+        If the lookup queries return multiple matches then retval is null
         */
-        //First see if cvv exists based on display name
-        ControlledVocabularyValue cvv = datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndStrValue(dsv, values[2], true);
-        
-        //then see if there's a match on identifier
-        ControlledVocabularyValue cvvi = null;
-        if (values[3] != null && !values[3].trim().isEmpty()){
-            cvvi = datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndIdentifier(dsv, values[3]);
-        }
-        
-        //if there's a match on identifier use it
-        if (cvvi != null){
-            cvv = cvvi;
-        }
+        ControlledVocabularyValue cvv = existsControlledVocabulary(dsv, values[2], values[3]);
 
         //if there's no match create a new one
         if (cvv == null) {
@@ -481,6 +508,32 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         datasetFieldService.save(cvv);
         return cvv.getStrValue();
     }
+
+    /**
+     * Checks if a controlled vocabulary already exists and returns it, or null.
+     * @param controlledVocabularyName name of the controlled vocabulary
+     * @return the {@link ControlledVocabularyValue} or null
+     */
+    private ControlledVocabularyValue existsControlledVocabulary(DatasetFieldType dsv,
+        String controlledVocabularyName, String cVIdentifier) {
+
+        //First see if cvv exists based on display name
+        ControlledVocabularyValue cvv = datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndStrValue(
+            dsv, controlledVocabularyName, true);
+
+        //then see if there's a match on identifier
+        ControlledVocabularyValue cvvi = null;
+        if (cVIdentifier != null && !cVIdentifier.trim().isEmpty()){
+            cvvi = datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndIdentifier(dsv, cVIdentifier);
+        }
+
+        //if there's a match on identifier use it
+        if (cvvi != null){
+            cvv = cvvi;
+        }
+        return cvv;
+    }
+
 
 
     @POST
