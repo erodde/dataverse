@@ -19,6 +19,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import jakarta.ejb.EJB;
 import jakarta.ejb.EJBException;
@@ -260,73 +261,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     @Consumes("application/json")
     @Path("renamecontrolledvocabulary")
     public Response renameControlledVocabulary(String body) {
-        JSONObject content = new JSONObject(body);
-        final String headerTypeName = HeaderType.CONTROLLEDVOCABULARY.getName();
-        ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
-        JsonArrayBuilder responseArr = Json.createArrayBuilder();
-
-        try {
-            final String oldIdentifier = content.getString("oldIdentifier");
-            final String newIdentifier = content.getString("newIdentifier");
-            final String oldName = content.getString("oldName");
-            final String newName = content.getString("newName");
-            final String datasetName = content.getString("datasetName");
-            alr.setInfo("rename " + headerTypeName + " identifier from " + oldIdentifier + " to " + newIdentifier +
-                " and name from " + oldName + " to " + newName);
-
-            DatasetFieldType dsf = (DatasetFieldType) findEntityByName(HeaderType.DATASETFIELD, datasetName);
-            if (dsf == null) {
-                String message = HeaderType.DATASETFIELD.getName() + " \"" + datasetName + "\" not found ";
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + "// " + message);
-                return error(Status.NOT_FOUND, message);
-            }
-
-            ControlledVocabularyValue cvv = existsControlledVocabulary(dsf, oldIdentifier, oldName);
-            if (cvv == null) {
-                String message = headerTypeName + " with identifier \"" + oldIdentifier +
-                    "\" and name \"" + oldName + "\" not found ";
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + "// " + message);
-                return error(Status.NOT_FOUND, message);
-            }
-
-            ControlledVocabularyValue cvvWithNewName = existsControlledVocabulary(dsf, newIdentifier, newName);
-            if (cvvWithNewName != null) {
-                String message = headerTypeName + " with identifier \"" + newIdentifier +
-                    "\" and name \"" + newName + "\" already exists ";
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.InternalError);
-                alr.setInfo(alr.getInfo() + "// " + message);
-                return error(Status.CONFLICT, message);
-            }
-
-            renameAndMergeEntity(HeaderType.CONTROLLEDVOCABULARY, cvv, newName, newIdentifier);
-
-            responseArr.add(Json.createObjectBuilder()
-                .add("old name", oldName)
-                .add("new name", newName)
-                .add("old identifier", oldIdentifier)
-                .add("new identifier", newIdentifier));
-        } catch (JSONException e) {
-            String message = "Request failed with malformed body ";
-            logger.log(Level.WARNING, message, e);
-            alr.setActionResult(ActionLogRecord.Result.BadRequest);
-            alr.setInfo(alr.getInfo() + "// " + message);
-            return error(Status.EXPECTATION_FAILED, message);
-        } catch (Exception e) {
-            String message = "Error processing request ";
-            logger.log(Level.SEVERE, message, e);
-            alr.setActionResult(ActionLogRecord.Result.InternalError);
-            alr.setInfo(alr.getInfo() + "// " + message);
-            return error(Status.INTERNAL_SERVER_ERROR, message);
-        } finally {
-            actionLogSvc.log(alr);
-        }
-
-        return ok(Json.createObjectBuilder().add("renamed " + headerTypeName, responseArr));
+        return renameControlledVocabularyEntity(body);
     }
 
     private Response renameEntity(String body, HeaderType headerType) {
@@ -338,11 +273,14 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         try {
             final String oldValue = content.getString("old");
             final String newValue = content.getString("new");
-            alr.setInfo("rename " + headerTypeName + " body from " + oldValue + " to " + newValue);
+
+            alr.setInfo(getMessage("api.admin.datasetfield.rename.renameEntity",
+                headerTypeName, oldValue, newValue));
 
             Object entity = findEntityByName(headerType, oldValue);
             if (entity == null) {
-                String message = headerTypeName + " \"" + oldValue + "\" not found ";
+                String message = getMessage("api.admin.datasetfield.rename.nameNotFound",
+                    headerTypeName, oldValue);
                 logger.log(Level.WARNING, message);
                 alr.setActionResult(ActionLogRecord.Result.BadRequest);
                 alr.setInfo(alr.getInfo() + "// " + message);
@@ -351,7 +289,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
 
             Object entityWithNewName = findEntityByName(headerType, newValue);
             if (entityWithNewName != null) {
-                String message = "new name \"" + newValue + "\" is already in use ";
+                String message = getMessage("api.admin.datasetfield.rename.nameInUse",
+                    newValue);
                 logger.log(Level.WARNING, message);
                 alr.setActionResult(ActionLogRecord.Result.InternalError);
                 alr.setInfo(alr.getInfo() + "// " + message);
@@ -364,16 +303,87 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 .add("old name", oldValue)
                 .add("new name", newValue));
         } catch (JSONException e) {
-            String message = "Request failed with malformed body ";
+            String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
             logger.log(Level.WARNING, message, e);
             alr.setActionResult(ActionLogRecord.Result.BadRequest);
-            alr.setInfo(alr.getInfo() + "// " + message);
+            alr.setInfo(alr.getInfo() + " // " + message);
             return error(Status.EXPECTATION_FAILED, message);
         } catch (Exception e) {
-            String message = "Error processing request ";
+            String message = getMessage("api.admin.datasetfield.rename.generalException", e.getMessage());
             logger.log(Level.SEVERE, message, e);
             alr.setActionResult(ActionLogRecord.Result.InternalError);
-            alr.setInfo(alr.getInfo() + "// " + message);
+            alr.setInfo(alr.getInfo() + " // " + message);
+            return error(Status.INTERNAL_SERVER_ERROR, message);
+        } finally {
+            actionLogSvc.log(alr);
+        }
+
+        return ok(Json.createObjectBuilder().add("renamed " + headerTypeName, responseArr));
+    }
+
+    private Response renameControlledVocabularyEntity(String body) {
+        JSONObject content = new JSONObject(body);
+        final String headerTypeName = HeaderType.CONTROLLEDVOCABULARY.getName();
+        ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
+        JsonArrayBuilder responseArr = Json.createArrayBuilder();
+
+        try {
+            final String oldIdentifier = content.getString("oldIdentifier");
+            final String newIdentifier = content.getString("newIdentifier");
+            final String oldName = content.getString("oldName");
+            final String newName = content.getString("newName");
+            final String datasetName = content.getString("datasetName");
+            alr.setInfo(getMessage("api.admin.datasetfield.rename.renameCcvEntity",
+                headerTypeName, oldIdentifier, newIdentifier, oldName, newName));
+
+            DatasetFieldType dsf = (DatasetFieldType) findEntityByName(HeaderType.DATASETFIELD, datasetName);
+            if (dsf == null) {
+                String message = getMessage("api.admin.datasetfield.rename.nameNotFound",
+                    HeaderType.DATASETFIELD.getName(), datasetName);
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.BadRequest);
+                alr.setInfo(alr.getInfo() + " // " + message);
+                return error(Status.NOT_FOUND, message);
+            }
+
+            ControlledVocabularyValue cvv = existsControlledVocabulary(dsf, oldIdentifier, oldName);
+            if (cvv == null) {
+                String message = getMessage("api.admin.datasetfield.rename.nameNotFoundCcv",
+                    headerTypeName, oldIdentifier, oldName);
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.BadRequest);
+                alr.setInfo(alr.getInfo() + " // " + message);
+                return error(Status.NOT_FOUND, message);
+            }
+
+            ControlledVocabularyValue cvvWithNewName = existsControlledVocabulary(dsf, newIdentifier, newName);
+            if (cvvWithNewName != null) {
+                String message = getMessage("api.admin.datasetfield.rename.nameInUseCcv",
+                    headerTypeName, newIdentifier, newName, datasetName);
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.InternalError);
+                alr.setInfo(alr.getInfo() + " // " + message);
+                return error(Status.CONFLICT, message);
+            }
+
+            renameAndMergeEntity(HeaderType.CONTROLLEDVOCABULARY, cvv, newName, newIdentifier);
+
+            responseArr.add(Json.createObjectBuilder()
+                .add("old name", oldName)
+                .add("new name", newName)
+                .add("old identifier", oldIdentifier)
+                .add("new identifier", newIdentifier));
+        } catch (JSONException e) {
+            String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
+            logger.log(Level.WARNING, message, e);
+            alr.setActionResult(ActionLogRecord.Result.BadRequest);
+            alr.setInfo(alr.getInfo() + " // " + message);
+            return error(Status.EXPECTATION_FAILED, message);
+        } catch (Exception e) {
+            String message = getMessage("api.admin.datasetfield.rename.generalException", e.getMessage());
+            logger.log(Level.SEVERE, message, e);
+            alr.setActionResult(ActionLogRecord.Result.InternalError);
+            alr.setInfo(alr.getInfo() + " // " + message);
             return error(Status.INTERNAL_SERVER_ERROR, message);
         } finally {
             actionLogSvc.log(alr);
@@ -542,6 +552,20 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             "api.admin.datasetfield.load.ArrayIndexOutOfBoundMessage",
             arguments
         );
+    }
+
+    /**
+     * Retrieves a message from a resource bundle using the specified key.
+     * One or more values can be provided to replace placeholders within the message.
+     *
+     * @param bundleName the key for the message in the bundle
+     * @param values one or more String values used for substitutions
+     * @return the formatted message
+     */
+    public String getMessage(String bundleName, String... values) {
+        List<String> arguments = new ArrayList<>();
+        Collections.addAll(arguments, values);
+        return BundleUtil.getStringFromBundle(bundleName, arguments);
     }
 
     /**
