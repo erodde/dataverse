@@ -40,7 +40,6 @@ import org.apache.commons.lang3.StringUtils;
 import static edu.harvard.iq.dataverse.util.json.JsonPrinter.asJsonArray;
 import edu.harvard.iq.dataverse.util.json.NullSafeJsonBuilder;
 
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jakarta.persistence.NoResultException;
@@ -228,19 +227,9 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     }
 
     public enum HeaderType {
-        METADATABLOCK("metadatablock"),
-        DATASETFIELD("datasetfield"),
-        CONTROLLEDVOCABULARY("controlledvocabulary");
-
-        private final String name;
-
-        HeaderType(String name) {
-            this.name = name;
-        }
-
-        public String getName() {
-            return name;
-        }
+        METADATABLOCK,
+        DATASETFIELD,
+        CONTROLLEDVOCABULARY;
     }
 
     @PATCH
@@ -265,12 +254,12 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     }
 
     private Response renameEntity(String body, HeaderType headerType) {
-        JSONObject content = new JSONObject(body);
-        final String headerTypeName = headerType.getName();
+        final String headerTypeName = headerType.name();
         ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
         JsonArrayBuilder responseArr = Json.createArrayBuilder();
 
         try {
+            JSONObject content = new JSONObject(body);
             final String oldValue = content.getString("old");
             final String newValue = content.getString("new");
 
@@ -283,7 +272,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                     headerTypeName, oldValue);
                 logger.log(Level.WARNING, message);
                 alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + "// " + message);
+                alr.setInfo(alr.getInfo() + " // " + message);
                 return error(Status.NOT_FOUND, message);
             }
 
@@ -293,15 +282,15 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                     newValue);
                 logger.log(Level.WARNING, message);
                 alr.setActionResult(ActionLogRecord.Result.InternalError);
-                alr.setInfo(alr.getInfo() + "// " + message);
+                alr.setInfo(alr.getInfo() + " // " + message);
                 return error(Status.CONFLICT, message);
             }
 
             renameAndMergeEntity(headerType, entity, newValue, null);
 
             responseArr.add(Json.createObjectBuilder()
-                .add("old name", oldValue)
-                .add("new name", newValue));
+                .add("oldName", oldValue)
+                .add("newName", newValue));
         } catch (JSONException e) {
             String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
             logger.log(Level.WARNING, message, e);
@@ -322,12 +311,12 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     }
 
     private Response renameControlledVocabularyEntity(String body) {
-        JSONObject content = new JSONObject(body);
-        final String headerTypeName = HeaderType.CONTROLLEDVOCABULARY.getName();
+        final String headerTypeName = HeaderType.CONTROLLEDVOCABULARY.name();
         ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
         JsonArrayBuilder responseArr = Json.createArrayBuilder();
 
         try {
+            JSONObject content = new JSONObject(body);
             final String oldIdentifier = content.getString("oldIdentifier");
             final String newIdentifier = content.getString("newIdentifier");
             final String oldName = content.getString("oldName");
@@ -339,7 +328,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             DatasetFieldType dsf = (DatasetFieldType) findEntityByName(HeaderType.DATASETFIELD, datasetName);
             if (dsf == null) {
                 String message = getMessage("api.admin.datasetfield.rename.nameNotFound",
-                    HeaderType.DATASETFIELD.getName(), datasetName);
+                    HeaderType.DATASETFIELD.name(), datasetName);
                 logger.log(Level.WARNING, message);
                 alr.setActionResult(ActionLogRecord.Result.BadRequest);
                 alr.setInfo(alr.getInfo() + " // " + message);
@@ -369,10 +358,10 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             renameAndMergeEntity(HeaderType.CONTROLLEDVOCABULARY, cvv, newName, newIdentifier);
 
             responseArr.add(Json.createObjectBuilder()
-                .add("old name", oldName)
-                .add("new name", newName)
-                .add("old identifier", oldIdentifier)
-                .add("new identifier", newIdentifier));
+                .add("oldName", oldName)
+                .add("newName", newName)
+                .add("oldIdentifier", oldIdentifier)
+                .add("newIdentifier", newIdentifier));
         } catch (JSONException e) {
             String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
             logger.log(Level.WARNING, message, e);
@@ -494,7 +483,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             return error(Status.INTERNAL_SERVER_ERROR, message);
 
         } catch (Exception e) {
-            String message = getGeneralErrorMessage(header, lineNumber, e.getMessage());
+            String message = getMessage("api.admin.datasetfield.load.GeneralErrorMessage",
+                header != null ? header.name() : "unknown", String.valueOf(lineNumber), e.getMessage());
             logger.log(Level.WARNING, message, e);
             alr.setActionResult(ActionLogRecord.Result.InternalError);
             alr.setInfo( alr.getInfo() + "// " + message);
