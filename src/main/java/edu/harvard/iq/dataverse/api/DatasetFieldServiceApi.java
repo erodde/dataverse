@@ -73,6 +73,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     ControlledVocabularyValueServiceBean controlledVocabularyValueService;
 
     private static final Logger logger = Logger.getLogger(DatasetFieldServiceApi.class.getName());
+
+    private static final String[] UNMODIFIABLE_METADATA = {"citation"};
     
     @GET
     public Response getAll() {
@@ -286,6 +288,15 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 return error(Status.CONFLICT, message);
             }
 
+            if (isUnmodifiable(headerType, entity)) {
+                String message = getMessage("api.admin.datasetfield.rename.unmodifiableMetadata",
+                    UNMODIFIABLE_METADATA);
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.BadRequest);
+                alr.setInfo(alr.getInfo() + " // " + message);
+                return error(Status.FORBIDDEN, message);
+            }
+
             renameAndMergeEntity(headerType, entity, newValue, null);
 
             responseArr.add(Json.createObjectBuilder()
@@ -317,8 +328,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
 
         try {
             JSONObject content = new JSONObject(body);
-            final String oldIdentifier = content.getString("oldIdentifier");
-            final String newIdentifier = content.getString("newIdentifier");
+            final String oldIdentifier = content.optString("oldIdentifier");
+            final String newIdentifier = content.optString("newIdentifier");
             final String oldName = content.getString("oldName");
             final String newName = content.getString("newName");
             final String datasetName = content.getString("datasetName");
@@ -335,7 +346,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 return error(Status.NOT_FOUND, message);
             }
 
-            ControlledVocabularyValue cvv = existsControlledVocabulary(dsf, oldIdentifier, oldName);
+            ControlledVocabularyValue cvv = existsControlledVocabulary(dsf, oldName, oldIdentifier);
             if (cvv == null) {
                 String message = getMessage("api.admin.datasetfield.rename.nameNotFoundCcv",
                     headerTypeName, oldIdentifier, oldName);
@@ -345,7 +356,7 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 return error(Status.NOT_FOUND, message);
             }
 
-            ControlledVocabularyValue cvvWithNewName = existsControlledVocabulary(dsf, newIdentifier, newName);
+            ControlledVocabularyValue cvvWithNewName = existsControlledVocabulary(dsf, newName, newIdentifier);
             if (cvvWithNewName != null) {
                 String message = getMessage("api.admin.datasetfield.rename.nameInUseCcv",
                     headerTypeName, newIdentifier, newName, datasetName);
@@ -353,6 +364,15 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 alr.setActionResult(ActionLogRecord.Result.InternalError);
                 alr.setInfo(alr.getInfo() + " // " + message);
                 return error(Status.CONFLICT, message);
+            }
+
+            if (isUnmodifiable(HeaderType.CONTROLLEDVOCABULARY, cvv)) {
+                String message = getMessage("api.admin.datasetfield.rename.unmodifiableMetadata",
+                    UNMODIFIABLE_METADATA);
+                logger.log(Level.WARNING, message);
+                alr.setActionResult(ActionLogRecord.Result.BadRequest);
+                alr.setInfo(alr.getInfo() + " // " + message);
+                return error(Status.FORBIDDEN, message);
             }
 
             renameAndMergeEntity(HeaderType.CONTROLLEDVOCABULARY, cvv, newName, newIdentifier);
@@ -407,9 +427,21 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 ((ControlledVocabularyValue) entity).setStrValue(newName);
                 ((ControlledVocabularyValue) entity).setIdentifier(newIdentifier);
                 datasetFieldService.save(((ControlledVocabularyValue) entity));
+                break;
             default:
                 throw new IllegalArgumentException("Unsupported entity type: " + entity.getClass());
         }
+    }
+
+    private boolean isUnmodifiable(HeaderType headerType, Object entity) {
+        String metadataBlockName = switch (headerType) {
+            case METADATABLOCK -> ((MetadataBlock) entity).getName();
+            case DATASETFIELD -> ((DatasetFieldType) entity).getMetadataBlock().getName();
+            case CONTROLLEDVOCABULARY ->
+                ((ControlledVocabularyValue) entity).getDatasetFieldType().getMetadataBlock().getName();
+            default -> throw new IllegalArgumentException("Unsupported entity type: " + entity.getClass());
+        };
+        return Arrays.asList(UNMODIFIABLE_METADATA).contains(metadataBlockName);
     }
 
     @POST

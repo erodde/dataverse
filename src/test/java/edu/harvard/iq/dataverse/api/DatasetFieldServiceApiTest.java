@@ -1,5 +1,9 @@
 package edu.harvard.iq.dataverse.api;
 
+import edu.harvard.iq.dataverse.ControlledVocabularyValue;
+import edu.harvard.iq.dataverse.ControlledVocabularyValueServiceBean;
+import edu.harvard.iq.dataverse.DatasetFieldServiceBean;
+import edu.harvard.iq.dataverse.DatasetFieldType;
 import edu.harvard.iq.dataverse.MetadataBlock;
 import edu.harvard.iq.dataverse.MetadataBlockServiceBean;
 import edu.harvard.iq.dataverse.actionlogging.ActionLogRecord;
@@ -38,6 +42,12 @@ public class DatasetFieldServiceApiTest {
 
     @Mock
     private MetadataBlockServiceBean metadataBlockService;
+
+    @Mock
+    private DatasetFieldServiceBean datasetFieldService;
+
+    @Mock
+    private ControlledVocabularyValueServiceBean controlledVocabularyValueService;
 
     @Mock
     private EntityManager em;
@@ -140,7 +150,7 @@ public class DatasetFieldServiceApiTest {
         assertEquals(ActionLogRecord.Result.OK, capturedLogRecord.getActionResult());
 
         assertEquals("rename " + DatasetFieldServiceApi.HeaderType.METADATABLOCK.name() +
-            " from before to after", capturedLogRecord.getInfo());
+            " from \"before\" to \"after\"", capturedLogRecord.getInfo());
         assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
     }
 
@@ -172,7 +182,7 @@ public class DatasetFieldServiceApiTest {
         assertEquals(ActionLogRecord.Result.BadRequest, capturedLogRecord.getActionResult());
 
         assertTrue(capturedLogRecord.getInfo().contains("rename " + DatasetFieldServiceApi.HeaderType.METADATABLOCK.name() +
-            " from notThere to after"));
+            " from \"notThere\" to \"after\""));
         assertTrue(capturedLogRecord.getInfo().contains(DatasetFieldServiceApi.HeaderType.METADATABLOCK.name() +
             " with value \"notThere\" not found"));
         assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
@@ -199,7 +209,7 @@ public class DatasetFieldServiceApiTest {
         assertEquals(409, response.getStatus());
         JsonReader jsonReader = Json.createReader(new StringReader(response.getEntity().toString()));
         JsonObject jsonResponse = jsonReader.readObject();
-        System.out.println(jsonResponse.getString("message"));
+
         assertTrue(jsonResponse.getString("message").contains(
             "new name \"after\" is already in use"));
 
@@ -209,7 +219,7 @@ public class DatasetFieldServiceApiTest {
         assertEquals(ActionLogRecord.Result.InternalError, capturedLogRecord.getActionResult());
 
         assertTrue(capturedLogRecord.getInfo().contains("rename " + DatasetFieldServiceApi.HeaderType.METADATABLOCK.name() +
-            " from before to after"));
+            " from \"before\" to \"after\""));
 
         assertTrue(capturedLogRecord.getInfo().contains("new name \"after\" is already in use"));
         assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
@@ -225,7 +235,6 @@ public class DatasetFieldServiceApiTest {
         assertEquals(417, response.getStatus());
         JsonReader jsonReader = Json.createReader(new StringReader(response.getEntity().toString()));
         JsonObject jsonResponse = jsonReader.readObject();
-        System.out.println(jsonResponse.getString("message"));
         assertTrue(jsonResponse.getString("message").contains(
             "request failed with malformed body"));
         assertTrue(jsonResponse.getString("message").contains(
@@ -235,10 +244,57 @@ public class DatasetFieldServiceApiTest {
         ActionLogRecord capturedLogRecord = logCaptor.getValue();
 
         assertEquals(ActionLogRecord.Result.BadRequest, capturedLogRecord.getActionResult());
-        System.out.println(capturedLogRecord.getInfo());
 
         assertTrue(capturedLogRecord.getInfo().contains("request failed with malformed body"));
         assertTrue(capturedLogRecord.getInfo().contains("JSONObject[\"old\"] not found."));
+        assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
+    }
+
+    @Test
+    public void testRenameControlledVocabularyNoIdentifier() {
+        final String jsonBody = """
+            {
+            "oldName": "before",
+            "newName": "after",
+            "datasetName": "dsName"
+            }
+            """;
+        DatasetFieldType dft = new DatasetFieldType();
+        dft.setName("dsName");
+        ControlledVocabularyValue cvv = new ControlledVocabularyValue();
+        cvv.setStrValue("before");
+        cvv.setDatasetFieldType(dft);
+        MetadataBlock mdb = new MetadataBlock();
+        mdb.setName("mdName");
+        dft.setMetadataBlock(mdb);
+
+        when(datasetFieldService.findByName("dsName")).thenReturn(dft);
+        when(datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndStrValue(dft,
+            "before", true)).thenReturn(cvv);
+
+        ArgumentCaptor<ActionLogRecord> logCaptor = ArgumentCaptor.forClass(ActionLogRecord.class);
+
+        Response response = api.renameControlledVocabulary(jsonBody);
+        assertEquals(200, response.getStatus());
+        JsonReader jsonReader = Json.createReader(new StringReader(response.getEntity().toString()));
+        JsonObject jsonResponse = jsonReader.readObject();
+
+        final String headerName = "renamed "
+            + DatasetFieldServiceApi.HeaderType.CONTROLLEDVOCABULARY.name();
+        assertTrue(jsonResponse.getJsonObject("data").containsKey(headerName));
+
+        assertEquals("before", parseJsonData(jsonResponse, headerName, "oldName"));
+        assertEquals("after", parseJsonData(jsonResponse, headerName, "newName"));
+        assertEquals("", parseJsonData(jsonResponse, headerName, "oldIdentifier"));
+        assertEquals("", parseJsonData(jsonResponse, headerName, "newIdentifier"));
+
+        verify(actionLogSvc, times(1)).log(logCaptor.capture());
+        ActionLogRecord capturedLogRecord = logCaptor.getValue();
+
+        assertEquals(ActionLogRecord.Result.OK, capturedLogRecord.getActionResult());
+
+        assertEquals("rename " + DatasetFieldServiceApi.HeaderType.CONTROLLEDVOCABULARY.name() +
+            " identifier from \"\" to \"\" and name from \"before\" to \"after\"", capturedLogRecord.getInfo());
         assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
     }
 
