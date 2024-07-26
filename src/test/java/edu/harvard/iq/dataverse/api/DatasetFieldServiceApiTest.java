@@ -298,6 +298,99 @@ public class DatasetFieldServiceApiTest {
         assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
     }
 
+    @Test
+    public void testRenameControlledVocabularyNewNameExists() {
+        final String jsonBody = """
+            {
+            "oldName": "before",
+            "newName": "after",
+            "oldIdentifier": "identOld",
+            "newIdentifier": "identNew",
+            "datasetName": "dsName"
+            }
+            """;
+        DatasetFieldType dft = new DatasetFieldType();
+        dft.setName("dsName");
+        ControlledVocabularyValue cvv1 = new ControlledVocabularyValue();
+        cvv1.setStrValue("before");
+        cvv1.setIdentifier("identOld");
+        cvv1.setDatasetFieldType(dft);
+        ControlledVocabularyValue cvv2 = new ControlledVocabularyValue();
+        cvv2.setStrValue("after");
+        cvv2.setIdentifier("identNew");
+        cvv2.setDatasetFieldType(dft);
+        MetadataBlock mdb = new MetadataBlock();
+        mdb.setName("mdName");
+        dft.setMetadataBlock(mdb);
+
+        when(datasetFieldService.findByName("dsName")).thenReturn(dft);
+        when(datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndStrValue(dft,
+            "before", true)).thenReturn(cvv1);
+        when(datasetFieldService.findControlledVocabularyValueByDatasetFieldTypeAndStrValue(dft,
+            "after", true)).thenReturn(cvv2);
+
+        ArgumentCaptor<ActionLogRecord> logCaptor = ArgumentCaptor.forClass(ActionLogRecord.class);
+
+        Response response = api.renameControlledVocabulary(jsonBody);
+        assertEquals(409, response.getStatus());
+        JsonReader jsonReader = Json.createReader(new StringReader(response.getEntity().toString()));
+        JsonObject jsonResponse = jsonReader.readObject();
+        System.out.println(jsonResponse.getString("message"));
+
+        assertTrue(jsonResponse.getString("message").contains(
+            DatasetFieldServiceApi.HeaderType.CONTROLLEDVOCABULARY.name() +
+            " with identifier \"identNew\" and name \"after\" already exists for dataset \"dsName\""));
+
+        verify(actionLogSvc, times(1)).log(logCaptor.capture());
+        ActionLogRecord capturedLogRecord = logCaptor.getValue();
+
+        assertEquals(ActionLogRecord.Result.InternalError, capturedLogRecord.getActionResult());
+
+        assertTrue(capturedLogRecord.getInfo().contains("rename " + DatasetFieldServiceApi.HeaderType.CONTROLLEDVOCABULARY.name() +
+            " identifier from \"identOld\" to \"identNew\" and name from \"before\" to \"after\""));
+
+        assertTrue(capturedLogRecord.getInfo().contains(DatasetFieldServiceApi.HeaderType.CONTROLLEDVOCABULARY.name() +
+            " with identifier \"identNew\" and name \"after\" already exists for dataset \"dsName\""));
+
+        assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
+    }
+
+    @Test
+    public void testRenameDatasetUnmodifiable() {
+        final String jsonBody = """
+            {
+              "old": "before",
+              "new": "after"
+            }
+            """;
+        MetadataBlock metadataBlock = new MetadataBlock();
+        metadataBlock.setName("citation");
+        DatasetFieldType datasetFieldType = new DatasetFieldType();
+        datasetFieldType.setName("before");
+        datasetFieldType.setMetadataBlock(metadataBlock);
+        when(datasetFieldService.findByName("before")).thenReturn(datasetFieldType);
+        ArgumentCaptor<ActionLogRecord> logCaptor = ArgumentCaptor.forClass(ActionLogRecord.class);
+
+        Response response = api.renameDataset(jsonBody);
+
+        assertEquals(403, response.getStatus());
+        JsonReader jsonReader = Json.createReader(new StringReader(response.getEntity().toString()));
+        JsonObject jsonResponse = jsonReader.readObject();
+
+        assertTrue(jsonResponse.getString("message").contains(
+            "it is not possible to modify metadata from the set citation"));
+
+        verify(actionLogSvc, times(1)).log(logCaptor.capture());
+        ActionLogRecord capturedLogRecord = logCaptor.getValue();
+
+        assertEquals(ActionLogRecord.Result.BadRequest, capturedLogRecord.getActionResult());
+
+        assertTrue(capturedLogRecord.getInfo().contains("rename " + DatasetFieldServiceApi.HeaderType.DATASETFIELD.name() +
+            " from \"before\" to \"after\""));
+        assertTrue(capturedLogRecord.getInfo().contains(
+            "it is not possible to modify metadata from the set citation"));
+        assertEquals(ActionLogRecord.ActionType.Admin, capturedLogRecord.getActionType());
+    }
 
     private String parseJsonData(JsonObject jsonResponse, String headerName, String keyName) {
         return jsonResponse

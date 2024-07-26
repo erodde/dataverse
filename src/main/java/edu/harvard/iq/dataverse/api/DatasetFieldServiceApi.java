@@ -229,11 +229,21 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     }
 
     public enum HeaderType {
-        METADATABLOCK,
-        DATASETFIELD,
-        CONTROLLEDVOCABULARY;
+        METADATABLOCK, DATASETFIELD, CONTROLLEDVOCABULARY
     }
 
+    /**
+     * Endpoint renames the specified metadata, if it is marked as modifiable. Request needs
+     * the following format:
+     * <pre>{@code
+     * {
+     *   "old": "<old name>",
+     *   "new": "<new name>"
+     * }
+     * }</pre>
+     * @param body contains information about metadata to be renamed
+     * @return success or error response
+     */
     @PATCH
     @Consumes("application/json")
     @Path("renamemetadata")
@@ -241,6 +251,18 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         return renameEntity(body, HeaderType.METADATABLOCK);
     }
 
+    /**
+     * Endpoint renames the specified dataset, if it is part of modifiable metadata. Request needs
+     * the following format:
+     * <pre>{@code
+     * {
+     *   "old": "<old name>",
+     *   "new": "<new name>"
+     * }
+     * }</pre>
+     * @param body contains information about dataset to be renamed
+     * @return success or error response
+     */
     @PATCH
     @Consumes("application/json")
     @Path("renamedataset")
@@ -248,6 +270,22 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         return renameEntity(body, HeaderType.DATASETFIELD);
     }
 
+    /**
+     * Endpoint renames the specified controlled vocabulary, if it is part of modifiable metadata.
+     * Request needs the following format:
+     * <pre>{@code
+     * {
+     *   "oldName": "<old name/strValue>",
+     *   "newName": "<new name/strValue>",
+     *   "oldIdentifier": "<old identifier>",
+     *   "newIdentifier": "<new identifier>",
+     *   "datasetName": "<dataset this controlled vocabulary belongs to>"
+     * }
+     * }</pre>
+     * Identifier values are optional and can be omitted in this request.
+     * @param body contains information about controlled vocabulary to be renamed
+     * @return success or error response
+     */
     @PATCH
     @Consumes("application/json")
     @Path("renamecontrolledvocabulary")
@@ -255,6 +293,17 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         return renameControlledVocabularyEntity(body);
     }
 
+    /**
+     * Renames an entity of a specific HeaderType if the following conditions are met:<p>
+     * <ol>
+     *     <li>old name exists</li>
+     *     <li>new name doesn't exist</li>
+     *     <li>entity not part of unmodifiable metadata</li>
+     * </ol>
+     * @param body contains information about entity to be renamed
+     * @param headerType defines the type of entity to be renamed
+     * @return success or error response
+     */
     private Response renameEntity(String body, HeaderType headerType) {
         final String headerTypeName = headerType.name();
         ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
@@ -270,31 +319,19 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
 
             Object entity = findEntityByName(headerType, oldValue);
             if (entity == null) {
-                String message = getMessage("api.admin.datasetfield.rename.nameNotFound",
-                    headerTypeName, oldValue);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.NOT_FOUND, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.NOT_FOUND,
+                    "api.admin.datasetfield.rename.nameNotFound", headerTypeName, oldValue);
             }
 
             Object entityWithNewName = findEntityByName(headerType, newValue);
             if (entityWithNewName != null) {
-                String message = getMessage("api.admin.datasetfield.rename.nameInUse",
-                    newValue);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.InternalError);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.CONFLICT, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.InternalError, Status.CONFLICT,
+                    "api.admin.datasetfield.rename.nameInUse", newValue);
             }
 
             if (isUnmodifiable(headerType, entity)) {
-                String message = getMessage("api.admin.datasetfield.rename.unmodifiableMetadata",
-                    UNMODIFIABLE_METADATA);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.FORBIDDEN, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.FORBIDDEN,
+                    "api.admin.datasetfield.rename.unmodifiableMetadata", UNMODIFIABLE_METADATA);
             }
 
             renameAndMergeEntity(headerType, entity, newValue, null);
@@ -303,17 +340,11 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 .add("oldName", oldValue)
                 .add("newName", newValue));
         } catch (JSONException e) {
-            String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
-            logger.log(Level.WARNING, message, e);
-            alr.setActionResult(ActionLogRecord.Result.BadRequest);
-            alr.setInfo(alr.getInfo() + " // " + message);
-            return error(Status.EXPECTATION_FAILED, message);
+            return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.EXPECTATION_FAILED,
+                "api.admin.datasetfield.rename.jsonException", e.getMessage());
         } catch (Exception e) {
-            String message = getMessage("api.admin.datasetfield.rename.generalException", e.getMessage());
-            logger.log(Level.SEVERE, message, e);
-            alr.setActionResult(ActionLogRecord.Result.InternalError);
-            alr.setInfo(alr.getInfo() + " // " + message);
-            return error(Status.INTERNAL_SERVER_ERROR, message);
+            return logError(alr, Level.SEVERE, ActionLogRecord.Result.InternalError, Status.INTERNAL_SERVER_ERROR,
+                "api.admin.datasetfield.rename.generalException", e.getMessage());
         } finally {
             actionLogSvc.log(alr);
         }
@@ -321,6 +352,17 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         return ok(Json.createObjectBuilder().add("renamed " + headerTypeName, responseArr));
     }
 
+    /**
+     * Renames a controlled vocabulary value (CVV) if the following conditions are met:<p>
+     * <ol>
+     *     <li>dataset exists</li>
+     *     <li>old name exists</li>
+     *     <li>new name doesn't exist</li>
+     *     <li>CVV not part of unmodifiable metadata</li>
+     * </ol>
+     * @param body contains information about CVV to be renamed
+     * @return success or error response
+     */
     private Response renameControlledVocabularyEntity(String body) {
         final String headerTypeName = HeaderType.CONTROLLEDVOCABULARY.name();
         ActionLogRecord alr = new ActionLogRecord(ActionLogRecord.ActionType.Admin, "rename " + headerTypeName);
@@ -338,41 +380,25 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
 
             DatasetFieldType dsf = (DatasetFieldType) findEntityByName(HeaderType.DATASETFIELD, datasetName);
             if (dsf == null) {
-                String message = getMessage("api.admin.datasetfield.rename.nameNotFound",
-                    HeaderType.DATASETFIELD.name(), datasetName);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.NOT_FOUND, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.NOT_FOUND,
+                    "api.admin.datasetfield.rename.nameNotFound", HeaderType.DATASETFIELD.name(), datasetName);
             }
 
             ControlledVocabularyValue cvv = existsControlledVocabulary(dsf, oldName, oldIdentifier);
             if (cvv == null) {
-                String message = getMessage("api.admin.datasetfield.rename.nameNotFoundCcv",
-                    headerTypeName, oldIdentifier, oldName);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.NOT_FOUND, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.NOT_FOUND,
+                    "api.admin.datasetfield.rename.nameNotFoundCcv", headerTypeName, oldIdentifier, oldName);
             }
 
             ControlledVocabularyValue cvvWithNewName = existsControlledVocabulary(dsf, newName, newIdentifier);
             if (cvvWithNewName != null) {
-                String message = getMessage("api.admin.datasetfield.rename.nameInUseCcv",
-                    headerTypeName, newIdentifier, newName, datasetName);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.InternalError);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.CONFLICT, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.InternalError, Status.CONFLICT,
+                    "api.admin.datasetfield.rename.nameInUseCcv", headerTypeName, newIdentifier, newName, datasetName);
             }
 
             if (isUnmodifiable(HeaderType.CONTROLLEDVOCABULARY, cvv)) {
-                String message = getMessage("api.admin.datasetfield.rename.unmodifiableMetadata",
-                    UNMODIFIABLE_METADATA);
-                logger.log(Level.WARNING, message);
-                alr.setActionResult(ActionLogRecord.Result.BadRequest);
-                alr.setInfo(alr.getInfo() + " // " + message);
-                return error(Status.FORBIDDEN, message);
+                return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.FORBIDDEN,
+                    "api.admin.datasetfield.rename.unmodifiableMetadata", UNMODIFIABLE_METADATA);
             }
 
             renameAndMergeEntity(HeaderType.CONTROLLEDVOCABULARY, cvv, newName, newIdentifier);
@@ -383,17 +409,11 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
                 .add("oldIdentifier", oldIdentifier)
                 .add("newIdentifier", newIdentifier));
         } catch (JSONException e) {
-            String message = getMessage("api.admin.datasetfield.rename.jsonException", e.getMessage());
-            logger.log(Level.WARNING, message, e);
-            alr.setActionResult(ActionLogRecord.Result.BadRequest);
-            alr.setInfo(alr.getInfo() + " // " + message);
-            return error(Status.EXPECTATION_FAILED, message);
+            return logError(alr, Level.WARNING, ActionLogRecord.Result.BadRequest, Status.EXPECTATION_FAILED,
+                "api.admin.datasetfield.rename.jsonException", e.getMessage());
         } catch (Exception e) {
-            String message = getMessage("api.admin.datasetfield.rename.generalException", e.getMessage());
-            logger.log(Level.SEVERE, message, e);
-            alr.setActionResult(ActionLogRecord.Result.InternalError);
-            alr.setInfo(alr.getInfo() + " // " + message);
-            return error(Status.INTERNAL_SERVER_ERROR, message);
+            return logError(alr, Level.SEVERE, ActionLogRecord.Result.InternalError, Status.INTERNAL_SERVER_ERROR,
+                "api.admin.datasetfield.rename.generalException", e.getMessage());
         } finally {
             actionLogSvc.log(alr);
         }
@@ -401,15 +421,22 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         return ok(Json.createObjectBuilder().add("renamed " + headerTypeName, responseArr));
     }
 
+    private Response logError(ActionLogRecord alr, Level logLevel, ActionLogRecord.Result actionResult,
+        Status status, String bundleName, String... messageValues) {
+        String message = getMessage(bundleName,
+            messageValues);
+        logger.log(logLevel, message);
+        alr.setActionResult(actionResult);
+        alr.setInfo(alr.getInfo() + " // " + message);
+        return error(status, message);
+    }
+
     private Object findEntityByName(HeaderType headerType, String name) {
-        switch (headerType) {
-            case METADATABLOCK:
-                return metadataBlockService.findByName(name);
-            case DATASETFIELD:
-                return datasetFieldService.findByName(name);
-            default:
-                throw new IllegalArgumentException("Unsupported header type: " + headerType);
-        }
+        return switch (headerType) {
+            case METADATABLOCK -> metadataBlockService.findByName(name);
+            case DATASETFIELD -> datasetFieldService.findByName(name);
+            default -> throw new IllegalArgumentException("Unsupported header type: " + headerType);
+        };
     }
 
     private void renameAndMergeEntity(HeaderType headerType, Object entity, String newName,
@@ -433,6 +460,12 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
         }
     }
 
+    /**
+     * If true, entities that are part of this metadata cannot be renamed.
+     * @param headerType type of entity
+     * @param entity entity object
+     * @return true if is unmodifiable
+     */
     private boolean isUnmodifiable(HeaderType headerType, Object entity) {
         String metadataBlockName = switch (headerType) {
             case METADATABLOCK -> ((MetadataBlock) entity).getName();
@@ -515,12 +548,9 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
             return error(Status.INTERNAL_SERVER_ERROR, message);
 
         } catch (Exception e) {
-            String message = getMessage("api.admin.datasetfield.load.GeneralErrorMessage",
+            return logError(alr, Level.WARNING, ActionLogRecord.Result.InternalError, Status.INTERNAL_SERVER_ERROR,
+                "api.admin.datasetfield.load.GeneralErrorMessage",
                 header != null ? header.name() : "unknown", String.valueOf(lineNumber), e.getMessage());
-            logger.log(Level.WARNING, message, e);
-            alr.setActionResult(ActionLogRecord.Result.InternalError);
-            alr.setInfo( alr.getInfo() + "// " + message);
-            return error(Status.INTERNAL_SERVER_ERROR, message);
             
         } finally {
             if (br != null) {
@@ -537,26 +567,11 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
     }
 
     /**
-     * Provide a general error message including the part and line number
-     * @param header
-     * @param lineNumber
-     * @param message
-     * @return
-     */
-    public String getGeneralErrorMessage(HeaderType header, int lineNumber, String message) {
-        List<String> arguments = new ArrayList<>();
-        arguments.add(header.name());
-        arguments.add(String.valueOf(lineNumber));
-        arguments.add(message);
-        return BundleUtil.getStringFromBundle("api.admin.datasetfield.load.GeneralErrorMessage", arguments);
-    }
-
-    /**
      * Turn ArrayIndexOutOfBoundsException into an informative error message
-     * @param lineNumber
-     * @param header
-     * @param e
-     * @return
+     * @param header the part of the metadata
+     * @param lineNumber the line where the index is out of bounds
+     * @param wrongIndex the column of error in the specified line
+     * @return the error message
      */
     public String getArrayIndexOutOfBoundMessage(HeaderType header,
                                                  int lineNumber,
@@ -592,8 +607,8 @@ public class DatasetFieldServiceApi extends AbstractApiBean {
 
     /**
      * Get the list of columns by the type of header
-     * @param header
-     * @return
+     * @param header the header type
+     * @return all columns the header type includes
      */
     private List<String> getColumnsByHeader(HeaderType header) {
         List<String> columns = null;
